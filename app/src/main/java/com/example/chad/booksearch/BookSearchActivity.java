@@ -11,7 +11,9 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
@@ -28,6 +30,8 @@ import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 
+import static android.R.attr.value;
+
 public class BookSearchActivity extends AppCompatActivity {
 
     private static final String LOG_TAG = BookSearchActivity.class.getName();
@@ -40,10 +44,13 @@ public class BookSearchActivity extends AppCompatActivity {
     private BookAdapter mBookAdapter;
     private ListView mListView;
     private ArrayList<Book> mBookList;
+    private TextView mEmptyStateTextView;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
         setContentView(R.layout.activity_book_search);
 
         mButton = (Button) findViewById(R.id.search_button);
@@ -58,15 +65,47 @@ public class BookSearchActivity extends AppCompatActivity {
         mListView = (ListView) findViewById(R.id.list);
         mListView.setAdapter(mBookAdapter);
 
+
+        // Get a reference to the ConnectivityManager to check state of network connectivity
+        ConnectivityManager connMgr = (ConnectivityManager)
+                getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        // Get details on the currently active default data network
+        final NetworkInfo networkInfo = connMgr.getActiveNetworkInfo();
+
+
         mButton.setOnClickListener(new View.OnClickListener() {
 
             @Override
             public void onClick(View v) {
 
-                BookAsyncTask task = new BookAsyncTask();
-                task.execute();
+                if (networkInfo != null && networkInfo.isConnected()) {
+
+                    new BookAsyncTask().execute();
+                } else {
+                    // Update empty state with no connection error message
+                    mEmptyStateTextView = (TextView) findViewById(R.id.empty_view);
+                    mListView.setEmptyView(mEmptyStateTextView);
+                    View loadingIndicator = findViewById(R.id.loading_indicator);
+                    loadingIndicator.setVisibility(View.GONE);
+                    mEmptyStateTextView.setText("No Internet Connection");
+                }
             }
         });
+
+        if (savedInstanceState != null) {
+            mBookList = (ArrayList<Book>) savedInstanceState.getSerializable("key");
+            mBookAdapter.clear();
+            mBookAdapter.addAll(mBookList);
+            mBookAdapter.notifyDataSetChanged();
+        }
+    }
+
+    @Override
+    public void onSaveInstanceState(Bundle savedState) {
+        super.onSaveInstanceState(savedState);
+        savedState.putSerializable("key", mBookList);
+
     }
 
 
@@ -76,26 +115,23 @@ public class BookSearchActivity extends AppCompatActivity {
      * @param bookList
      */
     private void updateUi(ArrayList<Book> bookList) {
-
         mBookList.clear();
-        mBookList.addAll(bookList);
 
-        mBookAdapter.clear();
-        mBookAdapter.addAll(bookList);
-        mBookAdapter.notifyDataSetChanged();
-        mListView.setAdapter(new BookAdapter(BookSearchActivity.this, mBookList));
-    }
+        if (bookList == null) {
+            mEmptyStateTextView = (TextView) findViewById(R.id.empty_view);
+            mListView.setEmptyView(mEmptyStateTextView);
+            View loadingIndicator = findViewById(R.id.loading_indicator);
+            loadingIndicator.setVisibility(View.GONE);
+            mEmptyStateTextView.setText("No Results found or invalid query entered. Please enter valid search terms.");
+        } else {
 
 
-    /**
-     * Check connectivity
-     *
-     * @return
-     */
-    public boolean isOnline() {
-        ConnectivityManager connMgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo networkInfo = connMgr.getActiveNetworkInfo();
-        return (networkInfo != null && networkInfo.isConnected());
+            mBookList.clear();
+            mBookList.addAll(bookList);
+
+            mBookAdapter.notifyDataSetChanged();
+            mListView.setAdapter(new BookAdapter(BookSearchActivity.this, mBookList));
+        }
     }
 
     /**
@@ -187,6 +223,7 @@ public class BookSearchActivity extends AppCompatActivity {
             JSONObject baseJsonResponse = new JSONObject(booksJSON);
             JSONArray itemsArray = baseJsonResponse.getJSONArray("items");
 
+
             // If there are results in the features array
             for (int i = 0; i < itemsArray.length(); i++) {
                 //Extract out the first feature
@@ -209,12 +246,10 @@ public class BookSearchActivity extends AppCompatActivity {
                 //Create a new {@link Event} object, add the book to the array
                 booksList.add(new Book(title, authors));
             }
-            if (itemsArray.length() == 0) {
-                Toast.makeText(BookSearchActivity.this, "No results found.", Toast.LENGTH_SHORT).show();
-                return null;
-            }
+
         } catch (JSONException e) {
             Log.e(LOG_TAG, "Problem parsing the book JSON results", e);
+            return null;
         }
         return booksList;
     }
@@ -225,6 +260,17 @@ public class BookSearchActivity extends AppCompatActivity {
      */
     private class BookAsyncTask extends AsyncTask<URL, Void, ArrayList<Book>> {
 
+        /**
+         * Check connectivity
+         *
+         * @return
+         */
+        public boolean isOnline() {
+            ConnectivityManager connMgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo networkInfo = connMgr.getActiveNetworkInfo();
+            return (networkInfo != null && networkInfo.isConnected());
+        }
+
         String userInput = mEditText.getText().toString().replace(" ", "+");
 
         @Override
@@ -234,7 +280,6 @@ public class BookSearchActivity extends AppCompatActivity {
             if (userInput.length() > 1) {
             } else if (userInput == null || userInput.equals("")) {
                 Log.e(LOG_TAG, "No search terms entered.");
-
                 return null;
             }
 
@@ -248,7 +293,6 @@ public class BookSearchActivity extends AppCompatActivity {
             } catch (IOException e) {
                 Log.e(LOG_TAG, "Problem making the HTTP request.", e);
             }
-
 
             //Extract relevant fields from the JSON response and create an {@link Event} object
 
@@ -271,21 +315,10 @@ public class BookSearchActivity extends AppCompatActivity {
             if (!network) {
                 Toast.makeText(BookSearchActivity.this, "Please connect to the Internet.", Toast.LENGTH_LONG).show();
                 Log.e(LOG_TAG, "Not connected to the Internet");
-            } else if (network == true) {
-
-                if (bookList == null) {
-                    return;
-                }
-                if (bookList != null) {
-                    Log.v(LOG_TAG, "size = " + bookList.size());
-                    mBookAdapter = new BookAdapter(BookSearchActivity.this, bookList);
-                    mListView.setAdapter(mBookAdapter);
-                }
-                mListView.setEmptyView(findViewById(R.id.empty_view));
-                mListView.setAdapter(mBookAdapter);
-
-                updateUi(bookList);
             }
+
+
+            updateUi(bookList);
         }
     }
 }
