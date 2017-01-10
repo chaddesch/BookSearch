@@ -13,7 +13,7 @@ public class Book implements Serializable {
 
     private String mAuthor;
 
-    public Book(String title, String author) {  
+    public Book(String title, String author) {
         mTitle = title;
         mAuthor = author;
     }
